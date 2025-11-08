@@ -2,6 +2,8 @@
 
 > **This is my first website!** A beautiful, interactive chess game built with HTML, CSS, and JavaScript.
 
+## 🚀 **[► PLAY THE GAME NOW! ◄](https://rohanx009.github.io/website/)**
+
 ![Chess Game](https://img.shields.io/badge/Game-Chess-blue)
 ![HTML](https://img.shields.io/badge/HTML-5-orange)
 ![CSS](https://img.shields.io/badge/CSS-3-blue)
@@ -10,7 +12,9 @@
 
 ## 🌟 Live Demo
 
-Open `chess_game.html` in your web browser to play!
+**🎮 Play Now:** [https://rohanx009.github.io/website/](https://rohanx009.github.io/website/)
+
+Or open `index.html` in your web browser to play locally!
 
 ## ✨ Features
 
