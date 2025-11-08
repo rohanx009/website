@@ -390,5 +390,218 @@ window.onclick = function(event) {
     }
 }
 
+// AI Hint System - Analyzes board and suggests best move
+function getAIHint() {
+    const currentPlayer = whiteTurn ? 'w' : 'b';
+    const allPossibleMoves = getAllPossibleMoves(currentPlayer);
+
+    if (allPossibleMoves.length === 0) {
+        showMessage('No valid moves available!', 'error');
+        return;
+    }
+
+    // Evaluate each move and pick the best one
+    const bestMove = evaluateBestMove(allPossibleMoves, currentPlayer);
+
+    if (bestMove) {
+        // Clear any previous hints
+        clearAIHints();
+
+        // Highlight the suggested move
+        const fromSquare = document.querySelector(`[data-row="${bestMove.fromRow}"][data-col="${bestMove.fromCol}"]`);
+        const toSquare = document.querySelector(`[data-row="${bestMove.toRow}"][data-col="${bestMove.toCol}"]`);
+
+        if (fromSquare && toSquare) {
+            fromSquare.classList.add('ai-hint');
+            toSquare.classList.add('ai-hint');
+
+            const pieceSymbol = PIECES[bestMove.piece];
+            const fromPos = String.fromCharCode(97 + bestMove.fromCol) + (8 - bestMove.fromRow);
+            const toPos = String.fromCharCode(97 + bestMove.toCol) + (8 - bestMove.toRow);
+
+            showMessage(`🤖 AI suggests: Move ${pieceSymbol} from ${fromPos} to ${toPos} (Score: ${bestMove.score.toFixed(1)})`, 'info');
+
+            // Clear hint after 5 seconds
+            setTimeout(clearAIHints, 5000);
+        }
+    }
+}
+
+// Get all possible moves for a player
+function getAllPossibleMoves(player) {
+    const moves = [];
+
+    for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+            const piece = board[row][col];
+            if (piece && piece[0] === player) {
+                // Check all possible destinations
+                for (let toRow = 0; toRow < 8; toRow++) {
+                    for (let toCol = 0; toCol < 8; toCol++) {
+                        if (isValidMove(row, col, toRow, toCol)) {
+                            moves.push({
+                                fromRow: row,
+                                fromCol: col,
+                                toRow: toRow,
+                                toCol: toCol,
+                                piece: piece,
+                                captured: board[toRow][toCol]
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return moves;
+}
+
+// Evaluate and find the best move
+function evaluateBestMove(moves, player) {
+    let bestMove = null;
+    let bestScore = -Infinity;
+
+    for (const move of moves) {
+        const score = evaluateMove(move, player);
+        move.score = score;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestMove = move;
+        }
+    }
+
+    return bestMove;
+}
+
+// Evaluate a move's quality
+function evaluateMove(move, player) {
+    let score = 0;
+
+    // Piece values
+    const pieceValues = {
+        'P': 10,  // Pawn
+        'N': 30,  // Knight
+        'B': 30,  // Bishop
+        'R': 50,  // Rook
+        'Q': 90,  // Queen
+        'K': 900  // King
+    };
+
+    // 1. Capturing opponent pieces is good
+    if (move.captured) {
+        const capturedType = move.captured[1];
+        score += pieceValues[capturedType] * 10;
+    }
+
+    // 2. Moving to center is good (control center)
+    const centerDistance = Math.abs(3.5 - move.toRow) + Math.abs(3.5 - move.toCol);
+    score += (7 - centerDistance) * 5;
+
+    // 3. Protecting pieces is good
+    score += countProtectedPieces(move, player) * 3;
+
+    // 4. Developing pieces (not pawns) early is good
+    const pieceType = move.piece[1];
+    if (pieceType !== 'P' && pieceType !== 'K') {
+        const startRow = player === 'w' ? 7 : 0;
+        if (move.fromRow === startRow || move.fromRow === (player === 'w' ? 6 : 1)) {
+            score += 8; // Bonus for developing pieces
+        }
+    }
+
+    // 5. Advancing pawns is good
+    if (pieceType === 'P') {
+        const advancement = player === 'w' ? (move.fromRow - move.toRow) : (move.toRow - move.fromRow);
+        score += advancement * 3;
+    }
+
+    // 6. Don't move into danger
+    if (isSquareUnderAttack(move.toRow, move.toCol, player === 'w' ? 'b' : 'w')) {
+        score -= pieceValues[pieceType] * 5;
+    }
+
+    // 7. Attack opponent pieces
+    score += countAttackedPieces(move, player) * 4;
+
+    // Add some randomness for variety (±10%)
+    score += (Math.random() - 0.5) * (score * 0.2);
+
+    return score;
+}
+
+// Check if a square is under attack
+function isSquareUnderAttack(row, col, byPlayer) {
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const piece = board[r][c];
+            if (piece && piece[0] === byPlayer) {
+                if (isValidMove(r, c, row, col)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// Count how many friendly pieces this move would protect
+function countProtectedPieces(move, player) {
+    let count = 0;
+    const tempPiece = board[move.toRow][move.toCol];
+    board[move.toRow][move.toCol] = move.piece;
+    board[move.fromRow][move.fromCol] = null;
+
+    for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+            const piece = board[row][col];
+            if (piece && piece[0] === player && !(row === move.toRow && col === move.toCol)) {
+                if (isValidMove(move.toRow, move.toCol, row, col)) {
+                    count++;
+                }
+            }
+        }
+    }
+
+    // Restore board
+    board[move.fromRow][move.fromCol] = move.piece;
+    board[move.toRow][move.toCol] = tempPiece;
+
+    return count;
+}
+
+// Count how many opponent pieces this move would attack
+function countAttackedPieces(move, player) {
+    let count = 0;
+    const opponent = player === 'w' ? 'b' : 'w';
+    const tempPiece = board[move.toRow][move.toCol];
+    board[move.toRow][move.toCol] = move.piece;
+    board[move.fromRow][move.fromCol] = null;
+
+    for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+            const piece = board[row][col];
+            if (piece && piece[0] === opponent) {
+                if (isValidMove(move.toRow, move.toCol, row, col)) {
+                    count++;
+                }
+            }
+        }
+    }
+
+    // Restore board
+    board[move.fromRow][move.fromCol] = move.piece;
+    board[move.toRow][move.toCol] = tempPiece;
+
+    return count;
+}
+
+// Clear AI hint highlights
+function clearAIHints() {
+    const hints = document.querySelectorAll('.ai-hint');
+    hints.forEach(hint => hint.classList.remove('ai-hint'));
+}
+
 // Initialize game on load
 window.onload = initGame;

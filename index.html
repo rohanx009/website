@@ -73,6 +73,9 @@
                     <button class="btn btn-secondary" onclick="undoMove()">
                         ↶ Undo Move
                     </button>
+                    <button class="btn btn-success" onclick="getAIHint()">
+                        🤖 AI Hint
+                    </button>
                     <button class="btn btn-info" onclick="showHelp()">
                         ❓ Help
                     </button>
@@ -111,7 +114,16 @@
                     <ul>
                         <li><strong>New Game:</strong> Start a fresh game</li>
                         <li><strong>Undo Move:</strong> Take back the last move</li>
+                        <li><strong>🤖 AI Hint:</strong> Get an unbiased move suggestion for the current player</li>
                         <li><strong>Help:</strong> Show this help dialog</li>
+                    </ul>
+
+                    <h3>AI Assistant:</h3>
+                    <ul>
+                        <li>The AI analyzes the board and suggests the best move</li>
+                        <li>Works for both White and Black players without bias</li>
+                        <li>Considers piece values, position, threats, and opportunities</li>
+                        <li>Highlighted squares show the suggested move (glowing blue)</li>
                     </ul>
                 </div>
             </div>
