@@ -10,6 +10,10 @@ let whiteTurn = true;
 let moveHistory = [];
 let capturedWhite = [];
 let capturedBlack = [];
+let hasMoved = {}; // Track which pieces have moved (for castling)
+let enPassantTarget = null; // Track en passant opportunity
+let gameOver = false;
+let checkStatus = { white: false, black: false };
 
 // Initialize the game
 function initGame() {
@@ -19,6 +23,10 @@ function initGame() {
     moveHistory = [];
     capturedWhite = [];
     capturedBlack = [];
+    hasMoved = {};
+    enPassantTarget = null;
+    gameOver = false;
+    checkStatus = { white: false, black: false };
     renderBoard();
     updateDisplay();
 }
@@ -122,51 +130,60 @@ function showValidMoves(row, col) {
 function isValidMove(fromRow, fromCol, toRow, toCol) {
     const piece = board[fromRow][fromCol];
     const target = board[toRow][toCol];
-    
+
     if (!piece) return false;
     if (piece[0] !== (whiteTurn ? 'w' : 'b')) return false;
     if (target && target[0] === piece[0]) return false;
     if (fromRow === toRow && fromCol === toCol) return false;
-    
+
     const pieceType = piece[1];
-    
+    let isValid = false;
+
     switch (pieceType) {
-        case 'P': return isValidPawnMove(fromRow, fromCol, toRow, toCol, piece);
-        case 'N': return isValidKnightMove(fromRow, fromCol, toRow, toCol);
-        case 'B': return isValidBishopMove(fromRow, fromCol, toRow, toCol);
-        case 'R': return isValidRookMove(fromRow, fromCol, toRow, toCol);
-        case 'Q': return isValidQueenMove(fromRow, fromCol, toRow, toCol);
-        case 'K': return isValidKingMove(fromRow, fromCol, toRow, toCol);
+        case 'P': isValid = isValidPawnMove(fromRow, fromCol, toRow, toCol, piece); break;
+        case 'N': isValid = isValidKnightMove(fromRow, fromCol, toRow, toCol); break;
+        case 'B': isValid = isValidBishopMove(fromRow, fromCol, toRow, toCol); break;
+        case 'R': isValid = isValidRookMove(fromRow, fromCol, toRow, toCol); break;
+        case 'Q': isValid = isValidQueenMove(fromRow, fromCol, toRow, toCol); break;
+        case 'K': isValid = isValidKingMove(fromRow, fromCol, toRow, toCol, piece); break;
         default: return false;
     }
-}
 
-// Pawn movement validation
+    if (!isValid) return false;
+
+    // Check if this move would leave or put own king in check
+    return !wouldBeInCheck(fromRow, fromCol, toRow, toCol, piece[0]);
+}// Pawn movement validation
 function isValidPawnMove(fromRow, fromCol, toRow, toCol, piece) {
     const direction = piece[0] === 'w' ? -1 : 1;
     const startRow = piece[0] === 'w' ? 6 : 1;
     const target = board[toRow][toCol];
-    
+
     // Move forward one square
     if (toCol === fromCol && toRow === fromRow + direction && !target) {
         return true;
     }
-    
+
     // Move forward two squares from start
-    if (toCol === fromCol && toRow === fromRow + 2 * direction && 
+    if (toCol === fromCol && toRow === fromRow + 2 * direction &&
         fromRow === startRow && !target && !board[fromRow + direction][fromCol]) {
         return true;
     }
-    
+
     // Capture diagonally
     if (Math.abs(toCol - fromCol) === 1 && toRow === fromRow + direction && target) {
         return true;
     }
-    
-    return false;
-}
 
-// Knight movement validation
+    // En Passant capture
+    if (Math.abs(toCol - fromCol) === 1 && toRow === fromRow + direction && !target) {
+        if (enPassantTarget && toRow === enPassantTarget.row && toCol === enPassantTarget.col) {
+            return true;
+        }
+    }
+
+    return false;
+}// Knight movement validation
 function isValidKnightMove(fromRow, fromCol, toRow, toCol) {
     const rowDiff = Math.abs(toRow - fromRow);
     const colDiff = Math.abs(toCol - fromCol);
@@ -192,8 +209,50 @@ function isValidQueenMove(fromRow, fromCol, toRow, toCol) {
 }
 
 // King movement validation
-function isValidKingMove(fromRow, fromCol, toRow, toCol) {
-    return Math.abs(toRow - fromRow) <= 1 && Math.abs(toCol - fromCol) <= 1;
+function isValidKingMove(fromRow, fromCol, toRow, toCol, piece) {
+    // Normal king move (one square in any direction)
+    if (Math.abs(toRow - fromRow) <= 1 && Math.abs(toCol - fromCol) <= 1) {
+        return true;
+    }
+
+    // Castling
+    if (Math.abs(toCol - fromCol) === 2 && fromRow === toRow) {
+        const kingColor = piece[0];
+        const row = kingColor === 'w' ? 7 : 0;
+        
+        // King must not have moved
+        if (hasMoved[`${fromRow}-${fromCol}`]) return false;
+        
+        // Check if castling kingside or queenside
+        const isKingside = toCol > fromCol;
+        const rookCol = isKingside ? 7 : 0;
+        const rook = board[row][rookCol];
+        
+        // Rook must exist and not have moved
+        if (!rook || rook[1] !== 'R' || hasMoved[`${row}-${rookCol}`]) return false;
+        
+        // Path between king and rook must be clear
+        const start = Math.min(fromCol, rookCol);
+        const end = Math.max(fromCol, rookCol);
+        for (let col = start + 1; col < end; col++) {
+            if (board[row][col]) return false;
+        }
+        
+        // King cannot be in check
+        if (isKingInCheck(kingColor)) return false;
+        
+        // King cannot pass through check
+        const direction = isKingside ? 1 : -1;
+        for (let col = fromCol; col !== toCol + direction; col += direction) {
+            if (wouldBeInCheck(fromRow, fromCol, fromRow, col, kingColor, true)) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+
+    return false;
 }
 
 // Check if path is clear
@@ -215,22 +274,76 @@ function isPathClear(fromRow, fromCol, toRow, toCol) {
 
 // Make a move
 function makeMove(fromRow, fromCol, toRow, toCol) {
+    if (gameOver) {
+        showMessage('Game is over! Start a new game.', 'error');
+        return;
+    }
+
     const piece = board[fromRow][fromCol];
-    const capturedPiece = board[toRow][toCol];
+    let capturedPiece = board[toRow][toCol];
+    const pieceType = piece[1];
+    const pieceColor = piece[0];
+
+    // Handle Castling
+    if (pieceType === 'K' && Math.abs(toCol - fromCol) === 2) {
+        const isKingside = toCol > fromCol;
+        const rookCol = isKingside ? 7 : 0;
+        const newRookCol = isKingside ? toCol - 1 : toCol + 1;
+        
+        // Move the rook
+        board[fromRow][newRookCol] = board[fromRow][rookCol];
+        board[fromRow][rookCol] = null;
+        hasMoved[`${fromRow}-${rookCol}`] = true;
+        
+        showMessage(`${PIECES[piece]} castled ${isKingside ? 'kingside' : 'queenside'}!`, 'success');
+    }
     
-    // Track captured pieces
-    if (capturedPiece) {
+    // Handle En Passant capture
+    if (pieceType === 'P' && enPassantTarget && toRow === enPassantTarget.row && toCol === enPassantTarget.col) {
+        const capturedPawnRow = pieceColor === 'w' ? toRow + 1 : toRow - 1;
+        capturedPiece = board[capturedPawnRow][toCol];
+        board[capturedPawnRow][toCol] = null;
+        
+        if (capturedPiece) {
+            if (capturedPiece[0] === 'w') {
+                capturedWhite.push(capturedPiece);
+            } else {
+                capturedBlack.push(capturedPiece);
+            }
+        }
+        showMessage(`${PIECES[piece]} captured en passant!`, 'success');
+    } else if (capturedPiece) {
+        // Track regular captured pieces
         if (capturedPiece[0] === 'w') {
             capturedWhite.push(capturedPiece);
         } else {
             capturedBlack.push(capturedPiece);
         }
     }
-    
+
+    // Clear en passant target (will be set again if applicable)
+    enPassantTarget = null;
+
+    // Set en passant target if pawn moves two squares
+    if (pieceType === 'P' && Math.abs(toRow - fromRow) === 2) {
+        const enPassantRow = (fromRow + toRow) / 2;
+        enPassantTarget = { row: enPassantRow, col: toCol };
+    }
+
     // Make the move
     board[toRow][toCol] = piece;
     board[fromRow][fromCol] = null;
-    
+
+    // Mark piece as having moved
+    hasMoved[`${fromRow}-${fromCol}`] = true;
+    hasMoved[`${toRow}-${toCol}`] = true;
+
+    // Check for Pawn Promotion
+    if (pieceType === 'P' && (toRow === 0 || toRow === 7)) {
+        showPromotionModal(toRow, toCol);
+        return; // Don't switch turn yet, wait for promotion choice
+    }
+
     // Record move
     const from = String.fromCharCode(97 + fromCol) + (8 - fromRow);
     const to = String.fromCharCode(97 + toCol) + (8 - toRow);
@@ -239,23 +352,39 @@ function makeMove(fromRow, fromCol, toRow, toCol) {
         from,
         to,
         captured: capturedPiece,
-        fromRow, fromCol, toRow, toCol
+        fromRow, fromCol, toRow, toCol,
+        enPassantTarget: enPassantTarget,
+        hasMoved: {...hasMoved}
     });
-    
+
     // Switch turn
     whiteTurn = !whiteTurn;
-    
-    // Show success message
-    const pieceSymbol = PIECES[piece];
-    if (capturedPiece) {
-        const capturedSymbol = PIECES[capturedPiece];
-        showMessage(`${pieceSymbol} captured ${capturedSymbol} at ${to}!`, 'success');
-    } else {
-        showMessage(`${pieceSymbol} moved to ${to}`, 'success');
-    }
-}
 
-// Update display
+    // Check for check, checkmate, or stalemate
+    updateCheckStatus();
+    
+    if (isCheckmate(!whiteTurn ? 'w' : 'b')) {
+        gameOver = true;
+        const winner = whiteTurn ? 'Black' : 'White';
+        showMessage(`🏆 Checkmate! ${winner} wins!`, 'success');
+        setTimeout(() => alert(`Checkmate! ${winner} wins the game!`), 500);
+    } else if (isStalemate(!whiteTurn ? 'w' : 'b')) {
+        gameOver = true;
+        showMessage(`Game over - Stalemate! It's a draw.`, 'info');
+        setTimeout(() => alert(`Stalemate! The game is a draw.`), 500);
+    } else if (checkStatus[!whiteTurn ? 'white' : 'black']) {
+        showMessage(`⚠️ Check! ${!whiteTurn ? 'White' : 'Black'} king is in danger!`, 'error');
+    } else {
+        // Show success message
+        const pieceSymbol = PIECES[piece];
+        if (capturedPiece) {
+            const capturedSymbol = PIECES[capturedPiece];
+            showMessage(`${pieceSymbol} captured ${capturedSymbol} at ${to}!`, 'success');
+        } else {
+            showMessage(`${pieceSymbol} moved to ${to}`, 'success');
+        }
+    }
+}// Update display
 function updateDisplay() {
     // Update turn indicator
     const turnIndicator = document.getElementById('turn-indicator');
@@ -348,13 +477,13 @@ function undoMove() {
         showMessage('No moves to undo!', 'error');
         return;
     }
-    
+
     const lastMove = moveHistory.pop();
     
     // Restore piece
     board[lastMove.fromRow][lastMove.fromCol] = lastMove.piece;
     board[lastMove.toRow][lastMove.toCol] = lastMove.captured;
-    
+
     // Restore captured piece
     if (lastMove.captured) {
         if (lastMove.captured[0] === 'w') {
@@ -363,16 +492,28 @@ function undoMove() {
             capturedBlack.pop();
         }
     }
+
+    // Restore game state
+    if (lastMove.enPassantTarget) {
+        enPassantTarget = lastMove.enPassantTarget;
+    } else {
+        enPassantTarget = null;
+    }
     
+    if (lastMove.hasMoved) {
+        hasMoved = lastMove.hasMoved;
+    }
+    
+    gameOver = false;
+
     // Switch turn back
     whiteTurn = !whiteTurn;
-    
+
     renderBoard();
     updateDisplay();
+    updateCheckStatus();
     showMessage('Move undone!', 'info');
-}
-
-// Show help
+}// Show help
 function showHelp() {
     document.getElementById('help-modal').style.display = 'block';
 }
@@ -601,6 +742,149 @@ function countAttackedPieces(move, player) {
 function clearAIHints() {
     const hints = document.querySelectorAll('.ai-hint');
     hints.forEach(hint => hint.classList.remove('ai-hint'));
+}
+
+// Check if a king is in check
+function isKingInCheck(color) {
+    // Find the king
+    let kingRow, kingCol;
+    for (let row = 0; row < 8; row++) {
+        for (let col = 0; col < 8; col++) {
+            const piece = board[row][col];
+            if (piece === color + 'K') {
+                kingRow = row;
+                kingCol = col;
+                break;
+            }
+        }
+        if (kingRow !== undefined) break;
+    }
+
+    // Check if any opponent piece can attack the king
+    const opponent = color === 'w' ? 'b' : 'w';
+    return isSquareUnderAttack(kingRow, kingCol, opponent);
+}
+
+// Check if a move would put/leave the king in check
+function wouldBeInCheck(fromRow, fromCol, toRow, toCol, color, skipActualMove = false) {
+    // Simulate the move
+    const piece = board[fromRow][fromCol];
+    const capturedPiece = board[toRow][toCol];
+    
+    if (!skipActualMove) {
+        board[toRow][toCol] = piece;
+        board[fromRow][fromCol] = null;
+    }
+
+    const inCheck = isKingInCheck(color);
+
+    // Undo the move
+    if (!skipActualMove) {
+        board[fromRow][fromCol] = piece;
+        board[toRow][toCol] = capturedPiece;
+    }
+
+    return inCheck;
+}
+
+// Update check status for both players
+function updateCheckStatus() {
+    checkStatus.white = isKingInCheck('w');
+    checkStatus.black = isKingInCheck('b');
+}
+
+// Check if a player is in checkmate
+function isCheckmate(color) {
+    if (!isKingInCheck(color)) return false;
+    return !hasLegalMoves(color);
+}
+
+// Check if a player is in stalemate
+function isStalemate(color) {
+    if (isKingInCheck(color)) return false;
+    return !hasLegalMoves(color);
+}
+
+// Check if a player has any legal moves
+function hasLegalMoves(color) {
+    for (let fromRow = 0; fromRow < 8; fromRow++) {
+        for (let fromCol = 0; fromCol < 8; fromCol++) {
+            const piece = board[fromRow][fromCol];
+            if (piece && piece[0] === color) {
+                // Check all possible destinations
+                for (let toRow = 0; toRow < 8; toRow++) {
+                    for (let toCol = 0; toCol < 8; toCol++) {
+                        // Temporarily set the turn to match the color we're checking
+                        const originalTurn = whiteTurn;
+                        whiteTurn = (color === 'w');
+                        
+                        if (isValidMove(fromRow, fromCol, toRow, toCol)) {
+                            whiteTurn = originalTurn;
+                            return true;
+                        }
+                        
+                        whiteTurn = originalTurn;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// Show pawn promotion modal
+function showPromotionModal(row, col) {
+    const color = board[row][col][0];
+    const modal = document.getElementById('promotion-modal');
+    const promotionPieces = document.getElementById('promotion-pieces');
+    
+    promotionPieces.innerHTML = '';
+    
+    const pieces = ['Q', 'R', 'B', 'N'];
+    const pieceNames = { Q: 'Queen', R: 'Rook', B: 'Bishop', N: 'Knight' };
+    
+    pieces.forEach(pieceType => {
+        const button = document.createElement('button');
+        button.className = 'promotion-choice';
+        button.textContent = PIECES[color + pieceType];
+        button.title = pieceNames[pieceType];
+        button.onclick = () => promotePawn(row, col, pieceType);
+        promotionPieces.appendChild(button);
+    });
+    
+    modal.style.display = 'block';
+}
+
+// Promote pawn to chosen piece
+function promotePawn(row, col, pieceType) {
+    const color = board[row][col][0];
+    board[row][col] = color + pieceType;
+    
+    document.getElementById('promotion-modal').style.display = 'none';
+    
+    // Switch turn after promotion
+    whiteTurn = !whiteTurn;
+    
+    // Check for check, checkmate, or stalemate
+    updateCheckStatus();
+    
+    if (isCheckmate(!whiteTurn ? 'w' : 'b')) {
+        gameOver = true;
+        const winner = whiteTurn ? 'Black' : 'White';
+        showMessage(`🏆 Checkmate! ${winner} wins!`, 'success');
+        setTimeout(() => alert(`Checkmate! ${winner} wins the game!`), 500);
+    } else if (isStalemate(!whiteTurn ? 'w' : 'b')) {
+        gameOver = true;
+        showMessage(`Game over - Stalemate! It's a draw.`, 'info');
+        setTimeout(() => alert(`Stalemate! The game is a draw.`), 500);
+    } else if (checkStatus[!whiteTurn ? 'white' : 'black']) {
+        showMessage(`⚠️ Check! ${!whiteTurn ? 'White' : 'Black'} king is in danger!`, 'error');
+    }
+    
+    renderBoard();
+    updateDisplay();
+    
+    showMessage(`♟️ Pawn promoted to ${PIECES[color + pieceType]}!`, 'success');
 }
 
 // Initialize game on load
