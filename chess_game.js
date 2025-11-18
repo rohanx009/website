@@ -15,6 +15,83 @@ let enPassantTarget = null; // Track en passant opportunity
 let gameOver = false;
 let checkStatus = { white: false, black: false };
 
+// Player data
+let players = {
+    white: { name: 'White Player', wins: 0, losses: 0, games: 0 },
+    black: { name: 'Black Player', wins: 0, losses: 0, games: 0 }
+};
+
+// Player Database using localStorage (simulates SQL database)
+const PlayerDB = {
+    // Get all players
+    getAllPlayers: function() {
+        const data = localStorage.getItem('chessPlayers');
+        return data ? JSON.parse(data) : {};
+    },
+    
+    // Get specific player
+    getPlayer: function(name) {
+        const players = this.getAllPlayers();
+        return players[name] || { name: name, wins: 0, losses: 0, games: 0, history: [] };
+    },
+    
+    // Save/Update player
+    savePlayer: function(name, data) {
+        const players = this.getAllPlayers();
+        players[name] = data;
+        localStorage.setItem('chessPlayers', JSON.stringify(players));
+    },
+    
+    // Record game result
+    recordGame: function(whiteName, blackName, winner) {
+        const whitePlayer = this.getPlayer(whiteName);
+        const blackPlayer = this.getPlayer(blackName);
+        
+        whitePlayer.games++;
+        blackPlayer.games++;
+        
+        const gameData = {
+            date: new Date().toISOString(),
+            opponent: blackName,
+            result: winner === 'white' ? 'win' : (winner === 'black' ? 'loss' : 'draw')
+        };
+        
+        const blackGameData = {
+            date: new Date().toISOString(),
+            opponent: whiteName,
+            result: winner === 'black' ? 'win' : (winner === 'white' ? 'loss' : 'draw')
+        };
+        
+        if (winner === 'white') {
+            whitePlayer.wins++;
+            blackPlayer.losses++;
+        } else if (winner === 'black') {
+            blackPlayer.wins++;
+            whitePlayer.losses++;
+        }
+        
+        if (!whitePlayer.history) whitePlayer.history = [];
+        if (!blackPlayer.history) blackPlayer.history = [];
+        
+        whitePlayer.history.push(gameData);
+        blackPlayer.history.push(blackGameData);
+        
+        this.savePlayer(whiteName, whitePlayer);
+        this.savePlayer(blackName, blackPlayer);
+    },
+    
+    // Get last played names
+    getLastPlayers: function() {
+        const lastPlayers = localStorage.getItem('lastPlayers');
+        return lastPlayers ? JSON.parse(lastPlayers) : null;
+    },
+    
+    // Save last played names
+    saveLastPlayers: function(whiteName, blackName) {
+        localStorage.setItem('lastPlayers', JSON.stringify({ white: whiteName, black: blackName }));
+    }
+};
+
 // Initialize the game
 function initGame() {
     board = initializeBoard();
@@ -29,6 +106,75 @@ function initGame() {
     checkStatus = { white: false, black: false };
     renderBoard();
     updateDisplay();
+    updatePlayerStats();
+}
+
+// Register players
+function registerPlayers(event) {
+    event.preventDefault();
+    
+    const whiteName = document.getElementById('white-player-input').value.trim();
+    const blackName = document.getElementById('black-player-input').value.trim();
+    
+    if (!whiteName || !blackName) {
+        alert('Please enter both player names!');
+        return;
+    }
+    
+    if (whiteName === blackName) {
+        alert('Players must have different names!');
+        return;
+    }
+    
+    // Load player data from database
+    players.white = PlayerDB.getPlayer(whiteName);
+    players.black = PlayerDB.getPlayer(blackName);
+    
+    players.white.name = whiteName;
+    players.black.name = blackName;
+    
+    // Save as last players
+    PlayerDB.saveLastPlayers(whiteName, blackName);
+    
+    // Update UI
+    document.getElementById('white-player-name').textContent = whiteName;
+    document.getElementById('black-player-name').textContent = blackName;
+    
+    // Close modal
+    document.getElementById('player-registration-modal').style.display = 'none';
+    
+    // Start game
+    initGame();
+    showMessage(`🎮 Game started! ${whiteName} vs ${blackName}`, 'success');
+}
+
+// Load previous players
+function loadPreviousPlayers() {
+    const lastPlayers = PlayerDB.getLastPlayers();
+    
+    if (lastPlayers) {
+        document.getElementById('white-player-input').value = lastPlayers.white;
+        document.getElementById('black-player-input').value = lastPlayers.black;
+        showMessage('📜 Previous players loaded!', 'info');
+    } else {
+        showMessage('No previous players found!', 'error');
+    }
+}
+
+// Update player statistics display
+function updatePlayerStats() {
+    // Update names
+    document.getElementById('white-name-display').textContent = players.white.name;
+    document.getElementById('black-name-display').textContent = players.black.name;
+    
+    // Update stats
+    document.getElementById('white-wins').textContent = players.white.wins;
+    document.getElementById('white-losses').textContent = players.white.losses;
+    document.getElementById('white-games').textContent = players.white.games;
+    
+    document.getElementById('black-wins').textContent = players.black.wins;
+    document.getElementById('black-losses').textContent = players.black.losses;
+    document.getElementById('black-games').textContent = players.black.games;
 }
 
 // Initialize board with starting positions
@@ -365,15 +511,42 @@ function makeMove(fromRow, fromCol, toRow, toCol) {
     
     if (isCheckmate(!whiteTurn ? 'w' : 'b')) {
         gameOver = true;
-        const winner = whiteTurn ? 'Black' : 'White';
-        showMessage(`🏆 Checkmate! ${winner} wins!`, 'success');
-        setTimeout(() => alert(`Checkmate! ${winner} wins the game!`), 500);
+        const winnerColor = whiteTurn ? 'black' : 'white';
+        const winnerName = whiteTurn ? players.black.name : players.white.name;
+        const loserName = whiteTurn ? players.white.name : players.black.name;
+        
+        // Record game in database
+        PlayerDB.recordGame(players.white.name, players.black.name, winnerColor);
+        
+        // Update local player stats
+        if (winnerColor === 'white') {
+            players.white.wins++;
+            players.black.losses++;
+        } else {
+            players.black.wins++;
+            players.white.losses++;
+        }
+        players.white.games++;
+        players.black.games++;
+        updatePlayerStats();
+        
+        showMessage(`🏆 Checkmate! ${winnerName} wins!`, 'success');
+        setTimeout(() => alert(`🏆 Checkmate!\n\n${winnerName} defeats ${loserName}!\n\nCongratulations!`), 500);
     } else if (isStalemate(!whiteTurn ? 'w' : 'b')) {
         gameOver = true;
+        
+        // Record draw in database
+        PlayerDB.recordGame(players.white.name, players.black.name, 'draw');
+        
+        players.white.games++;
+        players.black.games++;
+        updatePlayerStats();
+        
         showMessage(`Game over - Stalemate! It's a draw.`, 'info');
-        setTimeout(() => alert(`Stalemate! The game is a draw.`), 500);
+        setTimeout(() => alert(`Stalemate!\n\nThe game is a draw between ${players.white.name} and ${players.black.name}.`), 500);
     } else if (checkStatus[!whiteTurn ? 'white' : 'black']) {
-        showMessage(`⚠️ Check! ${!whiteTurn ? 'White' : 'Black'} king is in danger!`, 'error');
+        const checkedPlayer = !whiteTurn ? players.white.name : players.black.name;
+        showMessage(`⚠️ Check! ${checkedPlayer}'s king is in danger!`, 'error');
     } else {
         // Show success message
         const pieceSymbol = PIECES[piece];
@@ -386,30 +559,36 @@ function makeMove(fromRow, fromCol, toRow, toCol) {
     }
 }// Update display
 function updateDisplay() {
-    // Update turn indicator
+    // Update turn indicator with player names
     const turnIndicator = document.getElementById('turn-indicator');
+    const currentPlayer = whiteTurn ? players.white.name : players.black.name;
+    const currentIcon = whiteTurn ? '⚪' : '⚫';
+    
     if (whiteTurn) {
-        turnIndicator.innerHTML = '<span class="turn-icon">⚪</span><span class="turn-text">White\'s Turn</span>';
+        turnIndicator.innerHTML = `<span class="turn-icon">${currentIcon}</span><span class="turn-text">${currentPlayer}'s Turn</span>`;
         turnIndicator.style.background = 'linear-gradient(135deg, #0066ff 0%, #0044cc 100%)';
     } else {
-        turnIndicator.innerHTML = '<span class="turn-icon">⚫</span><span class="turn-text">Black\'s Turn</span>';
+        turnIndicator.innerHTML = `<span class="turn-icon">${currentIcon}</span><span class="turn-text">${currentPlayer}'s Turn</span>`;
         turnIndicator.style.background = 'linear-gradient(135deg, #ff0000 0%, #cc0000 100%)';
     }
     
+    // Update current turn text
+    document.getElementById('current-turn').textContent = currentPlayer;
+
     // Update move count
     document.getElementById('move-count').textContent = moveHistory.length;
-    
+
     // Update last move
     if (moveHistory.length > 0) {
         const lastMove = moveHistory[moveHistory.length - 1];
         const pieceSymbol = PIECES[lastMove.piece];
-        document.getElementById('last-move').textContent = 
+        document.getElementById('last-move').textContent =
             `${pieceSymbol} ${lastMove.from} → ${lastMove.to}`;
     }
-    
+
     // Update captured pieces
     updateCapturedPieces();
-    
+
     // Update move history
     updateMoveHistory();
 }
@@ -467,8 +646,13 @@ function newGame() {
             return;
         }
     }
-    initGame();
-    showMessage('New game started!', 'info');
+    
+    // Show player registration modal
+    document.getElementById('player-registration-modal').style.display = 'block';
+    
+    // Pre-fill with current players
+    document.getElementById('white-player-input').value = players.white.name;
+    document.getElementById('black-player-input').value = players.black.name;
 }
 
 // Undo move
@@ -870,15 +1054,42 @@ function promotePawn(row, col, pieceType) {
     
     if (isCheckmate(!whiteTurn ? 'w' : 'b')) {
         gameOver = true;
-        const winner = whiteTurn ? 'Black' : 'White';
-        showMessage(`🏆 Checkmate! ${winner} wins!`, 'success');
-        setTimeout(() => alert(`Checkmate! ${winner} wins the game!`), 500);
+        const winnerColor = whiteTurn ? 'black' : 'white';
+        const winnerName = whiteTurn ? players.black.name : players.white.name;
+        const loserName = whiteTurn ? players.white.name : players.black.name;
+        
+        // Record game in database
+        PlayerDB.recordGame(players.white.name, players.black.name, winnerColor);
+        
+        // Update local player stats
+        if (winnerColor === 'white') {
+            players.white.wins++;
+            players.black.losses++;
+        } else {
+            players.black.wins++;
+            players.white.losses++;
+        }
+        players.white.games++;
+        players.black.games++;
+        updatePlayerStats();
+        
+        showMessage(`🏆 Checkmate! ${winnerName} wins!`, 'success');
+        setTimeout(() => alert(`🏆 Checkmate!\n\n${winnerName} defeats ${loserName}!\n\nCongratulations!`), 500);
     } else if (isStalemate(!whiteTurn ? 'w' : 'b')) {
         gameOver = true;
+        
+        // Record draw in database
+        PlayerDB.recordGame(players.white.name, players.black.name, 'draw');
+        
+        players.white.games++;
+        players.black.games++;
+        updatePlayerStats();
+        
         showMessage(`Game over - Stalemate! It's a draw.`, 'info');
-        setTimeout(() => alert(`Stalemate! The game is a draw.`), 500);
+        setTimeout(() => alert(`Stalemate!\n\nThe game is a draw between ${players.white.name} and ${players.black.name}.`), 500);
     } else if (checkStatus[!whiteTurn ? 'white' : 'black']) {
-        showMessage(`⚠️ Check! ${!whiteTurn ? 'White' : 'Black'} king is in danger!`, 'error');
+        const checkedPlayer = !whiteTurn ? players.white.name : players.black.name;
+        showMessage(`⚠️ Check! ${checkedPlayer}'s king is in danger!`, 'error');
     }
     
     renderBoard();
